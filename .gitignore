@@ -1,0 +1,43 @@
+# .gitignore
+
+# ─── Python ───────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+.Python
+
+# ─── Virtual Environment ──────────────────────────
+env/
+venv/
+.venv/
+ENV/
+
+# ─── Django ───────────────────────────────────────
+*.log
+*.pot
+*.pyc
+db.sqlite3          # Never push your local database
+media/
+staticfiles/
+
+# ─── Environment Variables ────────────────────────
+.env                # NEVER push this — has your secret key & passwords
+.env.local
+.env.production
+
+# ─── IDE ──────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# ─── Docker ───────────────────────────────────────
+*.env.docker
+
+# ─── Coverage & Testing ───────────────────────────
+.coverage
+htmlcov/
+.pytest_cache/
