@@ -1,8 +1,7 @@
-# patient_scheduling_system/settings.py
-
 from pathlib import Path
 from datetime import timedelta
 import os
+import sys
 from decouple import config  # pip install python-decouple
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -136,3 +135,6 @@ CELERY_TASK_SERIALIZER = 'json'
 
 # ─── Password Reset Token Timeout ─────────────────────────────────────────────
 PASSWORD_RESET_TIMEOUT = 3600  # Reset link expires after 1 hour
+
+if 'test' in sys.argv:
+    EMAIL_BACKEND = 'django.core.mail.backends.locmem.EmailBackend'
