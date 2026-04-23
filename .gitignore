@@ -23,7 +23,7 @@ media/
 staticfiles/
 
 # ─── Environment Variables ────────────────────────
-.env                # NEVER push this — has your secret key & passwords
+.env
 .env.local
 .env.production
 
