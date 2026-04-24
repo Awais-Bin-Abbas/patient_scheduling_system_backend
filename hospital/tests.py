@@ -259,7 +259,9 @@ class HospitalNegativeTests(HospitalBaseSetup):
         """User with no hospital assigned gets a clear error message."""
         self.authenticate(self.unassigned_user, 'User@12345')
         response = self.client.get(self.list_url)
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        # Returns 400 because user has no hospital assigned
+        # TenantMixin returns 400 with clear error message
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('error', response.data)
 
     def test_restore_already_active_hospital_fails(self):

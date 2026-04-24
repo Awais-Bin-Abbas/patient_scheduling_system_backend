@@ -26,6 +26,7 @@ User = get_user_model()
 
 class RegisterUser(APIView):
     """Register a new user — accessible without authentication."""
+    authentication_classes = []
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
@@ -53,6 +54,7 @@ class RegisterUser(APIView):
 
 class LoginUser(APIView):
     """Login with username and password — returns access + refresh JWT tokens."""
+    authentication_classes = []
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):

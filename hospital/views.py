@@ -7,17 +7,21 @@ from rest_framework.permissions import IsAuthenticated
 from authentication.permissions import IsAdmin, IsAdminOrDoctor
 from .models import Hospital
 from .serializers import HospitalSerializer, HospitalListSerializer
+from hospital.mixins import TenantMixin
 
 
 # ─── CREATE ───────────────────────────────────────────────────────────────────
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])  # Only Admin can create hospitals
+@permission_classes([IsAuthenticated, IsAdmin])
 def create_hospital(request):
-    """Create a new hospital — Admin only. Auto-assigns requester as owner."""
+    """
+    Create a new hospital.
+    Admin only — automatically assigns the requesting admin as owner.
+    """
     serializer = HospitalSerializer(data=request.data)
     if serializer.is_valid():
-        # Automatically set the creating admin as the hospital owner
+        # Auto assign the creating admin as the hospital owner
         serializer.save(owner=request.user)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -26,41 +30,46 @@ def create_hospital(request):
 # ─── READ ─────────────────────────────────────────────────────────────────────
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])  # Any authenticated user can view hospitals
+@permission_classes([IsAuthenticated])
 def get_hospitals(request):
     """
-    Retrieve hospitals with tenant isolation:
-    - Admin sees ALL hospitals
-    - Doctor/User sees ONLY their own hospital
+    List hospitals with tenant isolation.
+    Admin sees all active hospitals.
+    Doctor and User see only their assigned hospital.
     """
     user = request.user
 
     if user.role == 'Admin':
-        # Admins get the full list of all hospitals
+        # Admin bypasses tenant filter — sees all active hospitals
         hospitals = Hospital.objects.filter(is_active=True)
         serializer = HospitalListSerializer(hospitals, many=True)
-    else:
-        # Non-admins can only see their own hospital
-        if not user.hospital:
-            return Response(
-                {"error": "You are not assigned to any hospital."},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        serializer = HospitalSerializer(user.hospital)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
+    # Non-admin users — resolve hospital after JWT auth has completed
+    hospital, error = TenantMixin.resolve_hospital(request)
+    if error:
+        return error
+
+    # Return only the user's own hospital with full details
+    serializer = HospitalSerializer(hospital)
     return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])  # Only Admin can view any hospital by ID
+@permission_classes([IsAuthenticated, IsAdmin])
 def get_hospital_by_id(request, hospital_id):
-    """Retrieve a specific hospital by its ID — Admin only."""
+    """
+    Retrieve a specific hospital by its ID.
+    Admin only — can access any hospital by ID.
+    """
     hospital = Hospital.objects.filter(id=hospital_id).first()
+
     if not hospital:
         return Response(
-            {"error": "Hospital not found."},
+            {'error': 'Hospital not found.'},
             status=status.HTTP_404_NOT_FOUND
         )
+
     serializer = HospitalSerializer(hospital)
     return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -68,17 +77,22 @@ def get_hospital_by_id(request, hospital_id):
 # ─── UPDATE ───────────────────────────────────────────────────────────────────
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])  # Only Admin can update hospitals
+@permission_classes([IsAuthenticated, IsAdmin])
 def update_hospital(request, hospital_id):
-    """Update hospital details — Admin only. Partial update supported."""
+    """
+    Update hospital details partially.
+    Admin only — can update name, address, contact info.
+    partial=True means only provided fields are updated.
+    """
     hospital = Hospital.objects.filter(id=hospital_id).first()
+
     if not hospital:
         return Response(
-            {"error": "Hospital not found."},
+            {'error': 'Hospital not found.'},
             status=status.HTTP_404_NOT_FOUND
         )
 
-    # partial=True allows updating only the fields provided
+    # partial=True allows updating only the fields that are provided
     serializer = HospitalSerializer(hospital, data=request.data, partial=True)
     if serializer.is_valid():
         serializer.save()
@@ -86,50 +100,65 @@ def update_hospital(request, hospital_id):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+# ─── SOFT DELETE ──────────────────────────────────────────────────────────────
+
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])  # Only Admin can delete hospitals
+@permission_classes([IsAuthenticated, IsAdmin])
 def delete_hospital(request, hospital_id):
     """
-    Soft-delete a hospital by marking it inactive.
-    Data is preserved — hospital is just hidden from active lists.
+    Soft delete a hospital by marking it as inactive.
+    Admin only — data is preserved, hospital is just hidden from active lists.
+    Hard delete is intentionally avoided to preserve patient and lead history.
     """
     hospital = Hospital.objects.filter(id=hospital_id).first()
+
     if not hospital:
         return Response(
-            {"error": "Hospital not found."},
+            {'error': 'Hospital not found.'},
             status=status.HTTP_404_NOT_FOUND
         )
 
+    # Soft delete — set inactive instead of removing from database
     hospital.is_active = False
     hospital.save()
+
     return Response(
-        {"message": f"Hospital '{hospital.name}' has been deactivated."},
+        {'message': f"Hospital '{hospital.name}' has been deactivated."},
         status=status.HTTP_200_OK
     )
 
 
+# ─── RESTORE ──────────────────────────────────────────────────────────────────
+
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])  # Only Admin can restore hospitals
+@permission_classes([IsAuthenticated, IsAdmin])
 def restore_hospital(request, hospital_id):
-    """Restore a previously deactivated hospital — Admin only."""
+    """
+    Restore a previously deactivated hospital.
+    Admin only — sets is_active back to True.
+    Returns 400 if hospital is already active.
+    """
     hospital = Hospital.objects.filter(id=hospital_id).first()
+
     if not hospital:
         return Response(
-            {"error": "Hospital not found."},
+            {'error': 'Hospital not found.'},
             status=status.HTTP_404_NOT_FOUND
         )
 
+    # Cannot restore a hospital that is already active
     if hospital.is_active:
         return Response(
-            {"message": "Hospital is already active."},
+            {'message': 'Hospital is already active.'},
             status=status.HTTP_400_BAD_REQUEST
         )
 
     # Reactivate the hospital
     hospital.is_active = True
     hospital.save()
+
     return Response(
-        {"message": f"Hospital '{hospital.name}' has been restored."},
+        {'message': f"Hospital '{hospital.name}' has been restored."},
         status=status.HTTP_200_OK
     )
 
@@ -139,7 +168,12 @@ def restore_hospital(request, hospital_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def hospital_stats(request):
-    """Return summary statistics for all hospitals — Admin only."""
+    """
+    Return summary statistics for all active hospitals.
+    Admin only — shows patient count and lead count per hospital.
+    Lead count is derived through patient relationship since Lead
+    has no direct hospital FK yet (added in Phase 4).
+    """
     from patients.models import Patient
     from leads.models import Lead
 
@@ -148,20 +182,21 @@ def hospital_stats(request):
 
     for hospital in hospitals:
         # Count patients directly linked to this hospital
-        total_patients = Patient.objects.filter(hospital=hospital).count()
+        total_patients = Patient.objects.filter(
+            hospital=hospital
+        ).count()
 
-        # Count leads by going through patient → hospital relationship
-        # since Lead has no direct hospital FK yet (added in Phase 4)
+        # Count leads via patient relationship — Lead → Patient → Hospital
         total_leads = Lead.objects.filter(
-            patient__hospital=hospital  # traverse: Lead→Patient→Hospital
+            patient__hospital=hospital
         ).count()
 
         stats.append({
-            'hospital_id': hospital.id,
-            'hospital_name': hospital.name,
+            'hospital_id':    hospital.id,
+            'hospital_name':  hospital.name,
             'total_patients': total_patients,
-            'total_leads': total_leads,
-            'is_active': hospital.is_active,
+            'total_leads':    total_leads,
+            'is_active':      hospital.is_active,
         })
 
     return Response(stats, status=status.HTTP_200_OK)
