@@ -2,7 +2,9 @@ from pathlib import Path
 from datetime import timedelta
 import os
 import sys
-from decouple import config  # pip install python-decouple
+from decouple import config  
+from celery.schedules import crontab
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -141,3 +143,33 @@ PASSWORD_RESET_TIMEOUT = 3600  # Reset link expires after 1 hour
 
 if 'test' in sys.argv:
     EMAIL_BACKEND = 'django.core.mail.backends.locmem.EmailBackend'
+
+
+CELERY_BEAT_SCHEDULE = {
+    # Run lead criteria nightly at midnight
+    'apply-lead-criteria-nightly': {
+        'task':     'leads.tasks.apply_lead_criteria',
+        'schedule': crontab(hour=0, minute=0),
+    }
+}
+
+# settings.py — replace the Celery Beat schedule section with this
+
+# ─── Celery Configuration ─────────────────────────────────────────────────────
+CELERY_BROKER_URL      = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
+CELERY_RESULT_BACKEND  = config('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
+CELERY_ACCEPT_CONTENT  = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+
+# Import crontab here after celery is confirmed installed
+try:
+    from celery.schedules import crontab
+    CELERY_BEAT_SCHEDULE = {
+        'apply-lead-criteria-nightly': {
+            'task':     'leads.tasks.apply_lead_criteria',
+            'schedule': crontab(hour=0, minute=0),
+        }
+    }
+except ImportError:
+    # Celery not installed yet — beat schedule skipped
+    pass
