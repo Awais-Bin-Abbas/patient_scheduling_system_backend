@@ -1,14 +1,14 @@
+# patient_scheduling_system/settings.py
+
 from pathlib import Path
 from datetime import timedelta
 import os
 import sys
-from decouple import config  
-from celery.schedules import crontab
-
+from decouple import config
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load secret key from .env file — never hardcode in production
+# Load secret key from .env file
 SECRET_KEY = config('SECRET_KEY', default='fallback-secret-key')
 
 DEBUG = config('DEBUG', default=True, cast=bool)
@@ -22,11 +22,13 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    # Third-party apps
+    # Third party
     'rest_framework',
     'rest_framework_simplejwt',
-    'rest_framework_simplejwt.token_blacklist',  # Enables JWT logout/blacklisting
-    'corsheaders',        # Allows React frontend to communicate with Django
+    'rest_framework_simplejwt.token_blacklist',
+    'corsheaders',
+    'django_celery_results',   # ← add this
+    'django_celery_beat',      # ← add this
     # Project apps
     'authentication',
     'hospital',
@@ -34,8 +36,6 @@ INSTALLED_APPS = [
     'leads',
     'reports',
 ]
-
-# settings.py
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
@@ -46,9 +46,9 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    # Attaches request.hospital to every authenticated request
     'hospital.middleware.TenantMiddleware',
 ]
+
 ROOT_URLCONF = 'patient_scheduling_system.urls'
 
 TEMPLATES = [
@@ -68,7 +68,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'patient_scheduling_system.wsgi.application'
 
-# Database — loaded from .env
+# ─── Database ─────────────────────────────────────────────────────────────────
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -76,6 +76,7 @@ DATABASES = {
     }
 }
 
+# ─── Password Validation ──────────────────────────────────────────────────────
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
@@ -84,84 +85,85 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
-USE_I18N = True
-USE_TZ = True
+TIME_ZONE     = 'UTC'
+USE_I18N      = True
+USE_TZ        = True
+STATIC_URL    = 'static/'
 
-STATIC_URL = 'static/'
-
-# Custom user model
+# ─── Custom User Model ────────────────────────────────────────────────────────
 AUTH_USER_MODEL = 'authentication.CustomUser'
 
-# ─── Django REST Framework ─────────────────────────────────────────────────────
+# ─── Django REST Framework ────────────────────────────────────────────────────
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework_simplejwt.authentication.JWTAuthentication',  # JWT for all APIs
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',  # All endpoints require login by default
+        'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 10,  # Return 10 records per page by default
+    'PAGE_SIZE': 10,
 }
 
-# ─── SimpleJWT Configuration ───────────────────────────────────────────────────
+# ─── SimpleJWT ────────────────────────────────────────────────────────────────
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),    # Access token expires in 60 mins
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),        # Refresh token expires in 7 days
-    'ROTATE_REFRESH_TOKENS': True,                      # Issue new refresh token on every refresh
-    'BLACKLIST_AFTER_ROTATION': True,                   # Blacklist old refresh token after rotation
-    'AUTH_HEADER_TYPES': ('Bearer',),                   # Use "Bearer <token>" in headers
-    'UPDATE_LAST_LOGIN': True,                          # Track last login time on token issue
+    'ACCESS_TOKEN_LIFETIME':  timedelta(minutes=60),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS':  True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+    'UPDATE_LAST_LOGIN': True,
 }
 
-# ─── CORS Configuration ────────────────────────────────────────────────────────
-# Allow React frontend (localhost:3000) to make requests to Django
+# ─── CORS ─────────────────────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
 ]
-CORS_ALLOW_CREDENTIALS = True  # Allow cookies/auth headers in cross-origin requests
+CORS_ALLOW_CREDENTIALS = True
 
-# ─── Email Configuration (for password reset emails) ──────────────────────────
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
-EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
-EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
-DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@hospital.com')
-
-# ─── Celery Configuration (for background report generation) ──────────────────
-CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-
-# ─── Password Reset Token Timeout ─────────────────────────────────────────────
-PASSWORD_RESET_TIMEOUT = 3600  # Reset link expires after 1 hour
-
+# ─── Email ────────────────────────────────────────────────────────────────────
 if 'test' in sys.argv:
+    # During tests print emails to terminal — no SMTP needed
     EMAIL_BACKEND = 'django.core.mail.backends.locmem.EmailBackend'
+elif DEBUG:
+    # During development print emails to terminal
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+else:
+    # Production — use real SMTP
+    EMAIL_BACKEND     = 'django.core.mail.backends.smtp.EmailBackend'
+    EMAIL_HOST        = config('EMAIL_HOST', default='smtp.gmail.com')
+    EMAIL_PORT        = config('EMAIL_PORT', default=587, cast=int)
+    EMAIL_USE_TLS     = True
+    EMAIL_HOST_USER   = config('EMAIL_HOST_USER', default='')
+    EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 
+DEFAULT_FROM_EMAIL    = config('DEFAULT_FROM_EMAIL', default='noreply@hospital.com')
+PASSWORD_RESET_TIMEOUT = 3600
 
-CELERY_BEAT_SCHEDULE = {
-    # Run lead criteria nightly at midnight
-    'apply-lead-criteria-nightly': {
-        'task':     'leads.tasks.apply_lead_criteria',
-        'schedule': crontab(hour=0, minute=0),
+# ─── Cache — No Redis ─────────────────────────────────────────────────────────
+# Using Django's built-in local memory cache
+# Works without any external service like Redis
+# Data lives in memory while server is running
+# Resets when server restarts — acceptable for development
+CACHES = {
+    'default': {
+        'BACKEND':  'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'pss-cache',  # unique name for this cache
     }
 }
 
-# settings.py — replace the Celery Beat schedule section with this
-
 # ─── Celery Configuration ─────────────────────────────────────────────────────
-CELERY_BROKER_URL      = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
-CELERY_RESULT_BACKEND  = config('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
-CELERY_ACCEPT_CONTENT  = ['json']
-CELERY_TASK_SERIALIZER = 'json'
+# TASK_ALWAYS_EAGER = True means tasks run synchronously in the same process
+# No broker, no worker, no Redis needed
+# Perfect for development — task runs immediately when .delay() is called
+CELERY_TASK_ALWAYS_EAGER         = True
+CELERY_TASK_EAGER_PROPAGATES     = True  # propagate exceptions from tasks
+CELERY_BROKER_URL                = 'memory://'  # in-memory broker
+CELERY_RESULT_BACKEND            = 'cache+memory://'  # in-memory result backend
+CELERY_ACCEPT_CONTENT            = ['json']
+CELERY_TASK_SERIALIZER           = 'json'
 
-# Import crontab here after celery is confirmed installed
 try:
     from celery.schedules import crontab
     CELERY_BEAT_SCHEDULE = {
@@ -171,5 +173,4 @@ try:
         }
     }
 except ImportError:
-    # Celery not installed yet — beat schedule skipped
     pass
