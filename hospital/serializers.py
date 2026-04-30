@@ -44,4 +44,4 @@ class HospitalListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Hospital
-        fields = ['id', 'name', 'slug', 'contact_info', 'is_active']
+        fields = ['id', 'name', 'slug', 'address', 'contact_info', 'is_active']

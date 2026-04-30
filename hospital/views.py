@@ -17,7 +17,7 @@ from hospital.mixins import TenantMixin
 def create_hospital(request):
     """
     Create a new hospital.
-    Admin only — automatically assigns the requesting admin as owner.
+    Admin only - automatically assigns the requesting admin as owner.
     """
     serializer = HospitalSerializer(data=request.data)
     if serializer.is_valid():
@@ -39,19 +39,23 @@ def get_hospitals(request):
     """
     user = request.user
 
-    if user.role == 'Admin':
-        # Admin bypasses tenant filter — sees all active hospitals
-        hospitals = Hospital.objects.filter(is_active=True)
+    # Superusers see all hospitals
+    if user.is_superuser:
+        hospitals = Hospital.objects.all()
         serializer = HospitalListSerializer(hospitals, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    # Non-admin users — resolve hospital after JWT auth has completed
+    # All other users (Admin, Doctor, User) resolved via TenantMixin
     hospital, error = TenantMixin.resolve_hospital(request)
     if error:
         return error
 
-    # Return only the user's own hospital with full details
-    serializer = HospitalSerializer(hospital)
+    # Admins get list view, others get detail view
+    if user.role == 'Admin':
+        serializer = HospitalListSerializer([hospital], many=True)
+    else:
+        serializer = HospitalSerializer(hospital)
+
     return Response(serializer.data, status=status.HTTP_200_OK)
 
 
@@ -60,15 +64,19 @@ def get_hospitals(request):
 def get_hospital_by_id(request, hospital_id):
     """
     Retrieve a specific hospital by its ID.
-    Admin only — can access any hospital by ID.
     """
-    hospital = Hospital.objects.filter(id=hospital_id).first()
+    # Superusers can access any hospital
+    if request.user.is_superuser:
+        hospital = Hospital.objects.filter(id=hospital_id).first()
+    else:
+        # Hospital admins can only access their own hospital
+        hospital, error = TenantMixin.resolve_hospital(request)
+        if error: return error
+        if hospital.id != hospital_id:
+            return Response({'error': 'Access Denied.'}, status=status.HTTP_403_FORBIDDEN)
 
     if not hospital:
-        return Response(
-            {'error': 'Hospital not found.'},
-            status=status.HTTP_404_NOT_FOUND
-        )
+        return Response({'error': 'Hospital not found.'}, status=status.HTTP_404_NOT_FOUND)
 
     serializer = HospitalSerializer(hospital)
     return Response(serializer.data, status=status.HTTP_200_OK)
@@ -81,19 +89,17 @@ def get_hospital_by_id(request, hospital_id):
 def update_hospital(request, hospital_id):
     """
     Update hospital details partially.
-    Admin only — can update name, address, contact info.
+    Admin only - can update name, address, contact info.
     partial=True means only provided fields are updated.
     """
-    hospital = Hospital.objects.filter(id=hospital_id).first()
+    # Resolve hospital and verify ownership
+    target_hospital, error = TenantMixin.resolve_hospital(request)
+    if error: return error
 
-    if not hospital:
-        return Response(
-            {'error': 'Hospital not found.'},
-            status=status.HTTP_404_NOT_FOUND
-        )
+    if not request.user.is_superuser and target_hospital.id != hospital_id:
+        return Response({'error': 'Access Denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-    # partial=True allows updating only the fields that are provided
-    serializer = HospitalSerializer(hospital, data=request.data, partial=True)
+    serializer = HospitalSerializer(target_hospital, data=request.data, partial=True)
     if serializer.is_valid():
         serializer.save()
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -107,23 +113,22 @@ def update_hospital(request, hospital_id):
 def delete_hospital(request, hospital_id):
     """
     Soft delete a hospital by marking it as inactive.
-    Admin only — data is preserved, hospital is just hidden from active lists.
+    Admin only - data is preserved, hospital is just hidden from active lists.
     Hard delete is intentionally avoided to preserve patient and lead history.
     """
-    hospital = Hospital.objects.filter(id=hospital_id).first()
+    # Resolve hospital and verify ownership
+    target_hospital, error = TenantMixin.resolve_hospital(request)
+    if error: return error
 
-    if not hospital:
-        return Response(
-            {'error': 'Hospital not found.'},
-            status=status.HTTP_404_NOT_FOUND
-        )
+    if not request.user.is_superuser and target_hospital.id != hospital_id:
+        return Response({'error': 'Access Denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-    # Soft delete — set inactive instead of removing from database
-    hospital.is_active = False
-    hospital.save()
+    # Soft delete - set inactive
+    target_hospital.is_active = False
+    target_hospital.save()
 
     return Response(
-        {'message': f"Hospital '{hospital.name}' has been deactivated."},
+        {'message': f"Hospital '{target_hospital.name}' has been deactivated."},
         status=status.HTTP_200_OK
     )
 
@@ -135,7 +140,7 @@ def delete_hospital(request, hospital_id):
 def restore_hospital(request, hospital_id):
     """
     Restore a previously deactivated hospital.
-    Admin only — sets is_active back to True.
+    Admin only - sets is_active back to True.
     Returns 400 if hospital is already active.
     """
     hospital = Hospital.objects.filter(id=hospital_id).first()
@@ -170,33 +175,33 @@ def restore_hospital(request, hospital_id):
 def hospital_stats(request):
     """
     Return summary statistics for all active hospitals.
-    Admin only — shows patient count and lead count per hospital.
+    Admin only - shows patient count and lead count per hospital.
     Lead count is derived through patient relationship since Lead
     has no direct hospital FK yet (added in Phase 4).
     """
     from patients.models import Patient
     from leads.models import Lead
 
-    hospitals = Hospital.objects.filter(is_active=True)
+    # Superusers see stats for all active hospitals
+    if request.user.is_superuser:
+        hospitals = Hospital.objects.filter(is_active=True)
+    else:
+        # Hospital Admins see only their own hospital stats
+        hospital, error = TenantMixin.resolve_hospital(request)
+        if error: return error
+        hospitals = [hospital]
+
     stats = []
-
-    for hospital in hospitals:
-        # Count patients directly linked to this hospital
-        total_patients = Patient.objects.filter(
-            hospital=hospital
-        ).count()
-
-        # Count leads via patient relationship — Lead → Patient → Hospital
-        total_leads = Lead.objects.filter(
-            patient__hospital=hospital
-        ).count()
+    for h in hospitals:
+        total_patients = Patient.objects.filter(hospital=h).count()
+        total_leads    = Lead.objects.filter(patient__hospital=h).count()
 
         stats.append({
-            'hospital_id':    hospital.id,
-            'hospital_name':  hospital.name,
+            'hospital_id':    h.id,
+            'hospital_name':  h.name,
             'total_patients': total_patients,
             'total_leads':    total_leads,
-            'is_active':      hospital.is_active,
+            'is_active':      h.is_active,
         })
 
     return Response(stats, status=status.HTTP_200_OK)

@@ -46,7 +46,7 @@ class Lead(models.Model):
         ('new',       'New'),
         ('contacted', 'Contacted'),
         ('qualified', 'Qualified'),
-        ('converted', 'Converted'),
+        ('converted', 'Appointed'),
         ('rejected',  'Rejected'),
     ]
 

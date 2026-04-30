@@ -26,7 +26,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'password', 'role', 'hospital']
+        fields = ['id', 'username', 'email', 'role', 'hospital', 'mfa_enabled', 'is_active']
 
     def create(self, validated_data):
         # Safe to access email directly now — UniqueValidator already confirmed it
@@ -44,7 +44,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
     """Serializer to return user profile details — no password exposed."""
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'role', 'hospital', 'mfa_enabled']
+        fields = ['id', 'username', 'email', 'role', 'hospital', 'mfa_enabled', 'is_active']
         read_only_fields = ['id', 'username', 'role']
 
 

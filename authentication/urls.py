@@ -22,4 +22,10 @@ urlpatterns = [
     # MFA Setup
     path('mfa/enable/', views.EnableMFAView.as_view(), name='mfa_enable'),
     path('mfa/verify/', views.VerifyMFAView.as_view(), name='mfa_verify'),
+
+    path('hospitals/public/',        views.list_hospitals_public,  name='list_hospitals_public'),
+    path('profile/assign-hospital/', views.assign_hospital, name='assign_hospital'),
+    path('doctors/', views.HospitalDoctorListView.as_view(), name='hospital_doctors'),
+    path('staff/',   views.hospital_staff_list,              name='hospital_staff_list'),
+    path('staff/<int:user_id>/', views.manage_staff_member,  name='manage_staff_member'),
 ]

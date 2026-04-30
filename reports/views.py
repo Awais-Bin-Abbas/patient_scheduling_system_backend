@@ -18,6 +18,12 @@ from .tasks import generate_hospital_report
 
 # ─── TRIGGER REPORT ───────────────────────────────────────────────────────────
 
+def invalidate_dashboard_cache(hospital):
+    try:
+        cache.delete(f'dashboard:{hospital.id}')
+    except Exception:
+        pass
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def trigger_report(request):
@@ -38,19 +44,18 @@ def trigger_report(request):
         status='pending'
     )
 
-    # Dispatch Celery task asynchronously
-    task = generate_hospital_report.delay(report.id)
+    # Dispatch Celery task synchronously for reliability in local dev
+    # Using .apply() instead of .delay() to execute in-process
+    task = generate_hospital_report.apply(args=[report.id])
 
-    # Save task ID to report for polling
-    report.task_id = task.id
-    report.save()
-
+    # Return the full report data immediately
+    serializer = ReportSerializer(report)
     return Response({
-        'message':   'Report generation started.',
+        'message':   'Report generation completed.',
         'report_id': report.id,
-        'task_id':   task.id,
-        'status':    'pending'
-    }, status=status.HTTP_202_ACCEPTED)
+        'status':    'complete',
+        'data':      serializer.data['data']
+    }, status=status.HTTP_201_CREATED)
 
 
 # ─── REPORT STATUS ────────────────────────────────────────────────────────────
@@ -223,7 +228,7 @@ def dashboard(request):
 
     # Try to cache — skip if Redis is down
     try:
-        cache.set(cache_key, data, timeout=300)
+        cache.set(cache_key, data, timeout=0)
     except Exception:
         pass
 
@@ -262,3 +267,24 @@ def all_hospitals_stats(request):
         })
 
     return Response(stats, status=status.HTTP_200_OK)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def clear_all_reports(request):
+    if request.user.role != 'Admin':
+        return Response({'error': 'Unauthorized'}, status=403)
+    Report.objects.filter(hospital=request.user.hospital).delete()
+    return Response({'message': 'All reports cleared.'}, status=200)
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_report(request, report_id):
+    if request.user.role != 'Admin':
+        return Response({'error': 'Unauthorized'}, status=403)
+    try:
+        report = Report.objects.get(id=report_id, hospital=request.user.hospital)
+        report.delete()
+        return Response({'message': 'Report deleted.'}, status=200)
+    except Report.DoesNotExist:
+        return Response({'error': 'Report not found.'}, status=404)
